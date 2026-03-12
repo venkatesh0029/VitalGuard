@@ -1,0 +1,98 @@
+{
+  "info": {
+    "name": "HealthGuard Backend API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/",
+          "host": ["{{base_url}}"],
+          "path": [""]
+        }
+      }
+    },
+    {
+      "name": "Predict - Normal",
+      "event": [{"listen": "test", "script": {"exec": ["pm.test(\"Normal risk\", () => {\n  pm.response.to.have.jsonBody(\"risk_level\", \"Normal\");\n});"], "type": "text/javascript"}}],
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"heart_rate\": 72,\n  \"spo2\": 98,\n  \"steps\": 5000,\n  \"user_id\": \"demo\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/predict",
+          "host": ["{{base_url}}"],
+          "path": ["api", "predict"]
+        }
+      }
+    },
+    {
+      "name": "Predict - Warning",
+      "event": [{"listen": "test", "script": {"exec": ["pm.test(\"Warning risk\", () => {\n  pm.response.to.have.jsonBody(\"risk_level\", \"Warning\");\n});"], "type": "text/javascript"}}],
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"heart_rate\": 110,\n  \"spo2\": 93,\n  \"steps\": 200,\n  \"user_id\": \"demo\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/predict",
+          "host": ["{{base_url}}"],
+          "path": ["api", "predict"]
+        }
+      }
+    },
+    {
+      "name": "Predict - Critical",
+      "event": [{"listen": "test", "script": {"exec": ["pm.test(\"Critical risk\", () => {\n  pm.response.to.have.jsonBody(\"risk_level\", \"Critical\");\n});"], "type": "text/javascript"}}],
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"heart_rate\": 145,\n  \"spo2\": 87,\n  \"steps\": 0,\n  \"user_id\": \"demo\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/api/predict",
+          "host": ["{{base_url}}"],
+          "path": ["api", "predict"]
+        }
+      }
+    },
+    {
+      "name": "History",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/history/demo?limit=10",
+          "host": ["{{base_url}}"],
+          "path": ["api", "history", "demo"],
+          "query": [{"key": "limit", "value": "10"}]
+        }
+      }
+    },
+    {
+      "name": "Clear History",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/api/history/demo",
+          "host": ["{{base_url}}"],
+          "path": ["api", "history", "demo"]
+        }
+      }
+    }
+  ],
+  "variable": [{"key": "base_url", "value": "http://localhost:8000"}]
+}
+
