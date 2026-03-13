@@ -74,12 +74,13 @@ def send_sms_alert(to_phone: str, user_id: str, risk_level: str,
     """
     from twilio.rest import Client
     
-    TWILIO_SID  = os.getenv("TWILIO_SID", "")
-    TWILIO_AUTH = os.getenv("TWILIO_AUTH", "")
-    TWILIO_FROM = os.getenv("TWILIO_FROM", "")
+    TWILIO_SID  = os.getenv("TWILIO_SID", "") or os.getenv("TWILIO_ACCOUNT_SID", "")
+    TWILIO_AUTH = os.getenv("TWILIO_AUTH", "") or os.getenv("TWILIO_AUTH_TOKEN", "")
+    # Allow Messaging Service SID or direct phone number
+    TWILIO_FROM = os.getenv("TWILIO_FROM", "") or os.getenv("TWILIO_MESSAGING_SERVICE_SID", "")
 
     if not TWILIO_SID or not TWILIO_AUTH or not TWILIO_FROM:
-        logger.warning("SMS not configured (set TWILIO_SID, TWILIO_AUTH, TWILIO_FROM env vars)")
+        logger.warning("SMS not configured (set TWILIO_* env vars)")
         return False
 
     body = (f"🚨 HealthGuard {risk_level} Alert!\n"
@@ -87,7 +88,10 @@ def send_sms_alert(to_phone: str, user_id: str, risk_level: str,
             f"Please seek medical attention.")
     try:
         client = Client(TWILIO_SID, TWILIO_AUTH)
-        client.messages.create(body=body, from_=TWILIO_FROM, to=to_phone)
+        if TWILIO_FROM.startswith("MG"):
+            client.messages.create(body=body, messaging_service_sid=TWILIO_FROM, to=to_phone)
+        else:
+            client.messages.create(body=body, from_=TWILIO_FROM, to=to_phone)
         logger.info(f"✅ SMS sent to {to_phone}")
         return True
     except Exception as e:

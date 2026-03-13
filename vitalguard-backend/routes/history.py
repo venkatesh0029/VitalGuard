@@ -61,7 +61,33 @@ def get_history(
 @router.get("/history")
 def get_all_history(limit: int = Query(default=100, ge=1, le=500)):
     """Fetch all records (admin/debug view)."""
-    return {"records": get_all_records(limit=limit)}
+    raw = get_all_records(limit=limit)
+    records = []
+    for r in raw:
+        ts = r.get("timestamp")
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts)
+
+        if "vitals_encrypted" in r:
+            decrypted = decrypt_vitals(r["vitals_encrypted"])
+            hr, spo2, steps = decrypted.get("hr", 0), decrypted.get("spo2", 0), decrypted.get("st", 0)
+        else:
+            hr = r.get("heart_rate", 0)
+            spo2 = r.get("spo2", 0)
+            steps = r.get("steps", 0)
+
+        records.append(HealthRecord(
+            id         = r.get("id") or r.get("_id"),
+            user_id    = r.get("user_id", "unknown"),
+            heart_rate = hr,
+            spo2       = spo2,
+            steps      = steps,
+            risk_level = r.get("risk_level", "Normal"),
+            risk_score = r.get("risk_score", 0.0),
+            timestamp  = ts or datetime.utcnow(),
+        ))
+
+    return {"records": records}
 
 
 @router.delete("/history/{user_id}")

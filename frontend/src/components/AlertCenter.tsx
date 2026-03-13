@@ -1,68 +1,30 @@
-import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Bell, AlertTriangle, Heart, Droplets, Activity, X, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import { Bell, AlertTriangle } from 'lucide-react';
+import { AlertItem } from '../types';
 
-interface Alert {
-  id: number;
-  type: 'critical' | 'warning' | 'info';
-  patient: string;
-  room: string;
-  message: string;
-  time: string;
-  read: boolean;
+interface AlertCenterProps {
+  alerts: AlertItem[];
 }
 
-const AlertCenter = () => {
-  const [alerts, setAlerts] = useState<Alert[]>([
-    {
-      id: 1,
-      type: 'critical',
-      patient: 'Michael Brown',
-      room: '210',
-      message: 'Heart rate critically high (118 BPM)',
-      time: '2 min ago',
-      read: false
-    },
-    {
-      id: 2,
-      type: 'warning',
-      patient: 'Sarah Smith',
-      room: '207',
-      message: 'SpO₂ levels dropping (93%)',
-      time: '15 min ago',
-      read: false
-    },
-    {
-      id: 3,
-      type: 'warning',
-      patient: 'Robert Wilson',
-      room: '212',
-      message: 'Irregular heart rhythm detected',
-      time: '25 min ago',
-      read: true
-    },
-    {
-      id: 4,
-      type: 'info',
-      patient: 'Emily Davis',
-      room: '205',
-      message: 'Medication reminder: 2:00 PM',
-      time: '1 hour ago',
-      read: true
-    },
-  ]);
-
+const AlertCenter: React.FC<AlertCenterProps> = ({ alerts }) => {
+  const [localAlerts, setLocalAlerts] = useState<AlertItem[]>(alerts);
   const [showAll, setShowAll] = useState(false);
-  const unreadCount = alerts.filter(a => !a.read).length;
 
-  const markAsRead = (id: number) => {
-    setAlerts(alerts.map(alert => 
+  useEffect(() => {
+    setLocalAlerts(alerts);
+  }, [alerts]);
+
+  const unreadCount = localAlerts.filter(a => !a.read).length;
+
+  const markAsRead = (id: string) => {
+    setLocalAlerts(localAlerts.map(alert => 
       alert.id === id ? { ...alert, read: true } : alert
     ));
   };
 
-  const dismissAlert = (id: number) => {
-    setAlerts(alerts.filter(alert => alert.id !== id));
+  const dismissAlert = (id: string) => {
+    setLocalAlerts(localAlerts.filter(alert => alert.id !== id));
   };
 
   const getAlertIcon = (type: string) => {
@@ -82,7 +44,7 @@ const AlertCenter = () => {
     }
   };
 
-  const displayedAlerts = showAll ? alerts : alerts.slice(0, 3);
+  const displayedAlerts = showAll ? localAlerts : localAlerts.slice(0, 3);
 
   return (
     <motion.div
@@ -90,7 +52,6 @@ const AlertCenter = () => {
       animate={{ opacity: 1, y: 0 }}
       className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg overflow-hidden"
     >
-      {/* Header */}
       <div className="p-6 border-b border-slate-200 dark:border-slate-700">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
@@ -105,7 +66,6 @@ const AlertCenter = () => {
         </div>
       </div>
 
-      {/* Alerts List */}
       <div className="divide-y divide-slate-200 dark:divide-slate-700">
         {displayedAlerts.map(alert => (
           <motion.div
@@ -119,7 +79,7 @@ const AlertCenter = () => {
               <div className="flex-1">
                 <div className="flex items-center justify-between">
                   <h4 className="font-semibold text-slate-800 dark:text-white">
-                    {alert.patient} · Room {alert.room}
+                    {alert.patient}
                   </h4>
                   <span className="text-xs text-slate-500">{alert.time}</span>
                 </div>
@@ -148,13 +108,12 @@ const AlertCenter = () => {
         ))}
       </div>
 
-      {/* Footer */}
       <div className="p-4 border-t border-slate-200 dark:border-slate-700">
         <button
           onClick={() => setShowAll(!showAll)}
           className="w-full text-center text-sm text-blue-500 hover:text-blue-600 font-medium"
         >
-          {showAll ? 'Show Less' : `View All Alerts (${alerts.length})`}
+          {showAll ? 'Show Less' : `View All Alerts (${localAlerts.length})`}
         </button>
       </div>
     </motion.div>

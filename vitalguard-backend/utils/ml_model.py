@@ -1,36 +1,28 @@
-import pickle
 import os
-import numpy as np
+import httpx
 import logging
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = os.getenv("MODEL_PATH", "models/health_model.pkl")
+# The new standalone AI Engine endpoint running on port 8001
+AI_ENGINE_URL = os.getenv("AI_ENGINE_URL", "http://127.0.0.1:8001/predict")
 
-_model = None  # cached model instance
-
-def load_model():
-    """Load the .pkl model once and cache it."""
-    global _model
-    if _model is None:
-        if os.path.exists(MODEL_PATH):
-            try:
-                with open(MODEL_PATH, "rb") as f:
-                    _model = pickle.load(f)
-                logger.info(f"✅ ML model loaded successfully from {MODEL_PATH}")
-            except Exception as e:
-                logger.error(f"❌ Failed to load model: {e}")
-                _model = "FALLBACK"
-        else:
-            logger.warning(f"⚠️  Model file not found at {MODEL_PATH} — using rule-based fallback")
-            _model = "FALLBACK"
-    return _model
+async def load_model():
+    """Check AI engine availability."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(AI_ENGINE_URL.replace("/predict", "/"), timeout=2.0)
+            if response.status_code == 200:
+                logger.info(f"✅ Connected to AI Engine at {AI_ENGINE_URL}")
+                return "ONLINE"
+    except httpx.RequestError as e:
+        logger.warning(f"⚠️ AI Engine not reachable at {AI_ENGINE_URL}: {e}")
+    return "OFFLINE"
 
 def rule_based_predict(heart_rate: float, spo2: float, steps: int) -> dict:
     """
     Simple rule-based fallback when no trained model is available.
-    Replace this with your trained model logic.
     """
     score = 0.0
 
@@ -61,37 +53,47 @@ def rule_based_predict(heart_rate: float, spo2: float, steps: int) -> dict:
 
     return {"risk_level": risk, "risk_score": round(score, 3), "confidence": 0.82}
 
-def run_prediction(heart_rate: float, spo2: float, steps: int) -> dict:
-    """Run prediction using ML model or fallback."""
-    model = load_model()
+async def run_prediction(heart_rate: float, spo2: float, steps: int) -> dict:
+    """Run prediction by calling the standalone Python AI Engine asynchronously."""
     logger.debug(f"Running prediction: HR={heart_rate}, SpO2={spo2}, Steps={steps}")
 
-    if model == "FALLBACK":
-        logger.info("Using rule-based prediction (ML model not available)")
-        return rule_based_predict(heart_rate, spo2, steps)
+    payload = {
+        "heart_rate": heart_rate,
+        "spo2": spo2,
+        "steps": steps,
+        "stress_level": 2, # Default as backend doesn't take stress level natively yet
+        "source": "backend_api"
+    }
 
     try:
-        features = np.array([[heart_rate, spo2, steps]])
-        prediction = model.predict(features)[0]
-        proba = model.predict_proba(features)[0]
+        # Call the standalone AI server asynchronously to prevent blocking the FastAPI event loop
+        async with httpx.AsyncClient() as client:
+            response = await client.post(AI_ENGINE_URL, json=payload, timeout=5.0)
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Extract the prediction part from the API
+            prediction = result.get("prediction", {})
+            
+            risk_level = prediction.get("risk_level", "Normal")
+            confidence = prediction.get("confidence", 0.5)
+            
+            # Compute a 0-1 danger score for the backend DB based on risk string
+            danger_scores = {"Normal": 0.1, "Warning": 0.6, "Critical": 0.9}
+            danger_score = danger_scores.get(risk_level, 0.5)
 
-        # Map numeric label to string (adjust based on how your model was trained)
-        label_map = {0: "Normal", 1: "Warning", 2: "Critical"}
-        risk_level = label_map.get(int(prediction), str(prediction))
-
-        risk_score = float(max(proba))
-        confidence = round(risk_score, 3)
-
-        # Compute a 0-1 danger score (probability of Warning + Critical)
-        danger_score = round(1 - proba[0], 3) if len(proba) > 1 else risk_score
-
-        logger.info(f"✅ Prediction: {risk_level} (confidence: {confidence})")
-        
-        return {
-            "risk_level": risk_level,
-            "risk_score": danger_score,
-            "confidence": confidence
-        }
-    except Exception as e:
-        logger.error(f"❌ Model prediction error: {e} — falling back to rules", exc_info=True)
+            logger.info(f"✅ AI Engine Prediction: {risk_level} (confidence: {confidence}) - Reason: {prediction.get('reasoning', '')}")
+            
+            return {
+                "risk_level": risk_level,
+                "risk_score": danger_score,
+                "confidence": confidence
+            }
+            
+    except httpx.RequestError as e:
+        logger.error(f"❌ AI Engine prediction error: {e} — falling back to rules")
+        return rule_based_predict(heart_rate, spo2, steps)
+    except httpx.HTTPStatusError as e:
+        logger.error(f"❌ AI Engine returned error status {e.response.status_code} — falling back to rules")
         return rule_based_predict(heart_rate, spo2, steps)

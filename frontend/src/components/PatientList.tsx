@@ -1,89 +1,21 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Heart, Activity, Droplets, Thermometer, ChevronRight, AlertCircle } from 'lucide-react';
-
-interface Patient {
-  id: number;
-  name: string;
-  room: string;
-  age: number;
-  status: 'stable' | 'warning' | 'critical';
-  heartRate: number;
-  spo2: number;
-  temperature: number;
-  lastUpdate: string;
-}
+import { Heart, Droplets, ChevronRight } from 'lucide-react';
+import { PatientItem } from '../types';
 
 interface PatientListProps {
+  patients: PatientItem[];
   searchQuery?: string;
   setActiveItem?: (item: string) => void;
 }
 
-const PatientList: React.FC<PatientListProps> = ({ searchQuery = '', setActiveItem }) => {
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+const PatientList: React.FC<PatientListProps> = ({ patients, searchQuery = '', setActiveItem }) => {
+  const [selectedPatient, setSelectedPatient] = useState<PatientItem | null>(null);
   const [filter, setFilter] = useState<'all' | 'stable' | 'warning' | 'critical'>('all');
-
-  const patients: Patient[] = [
-    { 
-      id: 1, 
-      name: 'John Doe', 
-      room: '204', 
-      age: 45,
-      status: 'stable', 
-      heartRate: 72, 
-      spo2: 98, 
-      temperature: 36.6,
-      lastUpdate: '2 min ago'
-    },
-    { 
-      id: 2, 
-      name: 'Sarah Smith', 
-      room: '207', 
-      age: 62,
-      status: 'warning', 
-      heartRate: 92, 
-      spo2: 93, 
-      temperature: 37.2,
-      lastUpdate: '1 min ago'
-    },
-    { 
-      id: 3, 
-      name: 'Michael Brown', 
-      room: '210', 
-      age: 78,
-      status: 'critical', 
-      heartRate: 118, 
-      spo2: 88, 
-      temperature: 38.1,
-      lastUpdate: 'just now'
-    },
-    { 
-      id: 4, 
-      name: 'Emily Davis', 
-      room: '205', 
-      age: 34,
-      status: 'stable', 
-      heartRate: 68, 
-      spo2: 99, 
-      temperature: 36.8,
-      lastUpdate: '5 min ago'
-    },
-    { 
-      id: 5, 
-      name: 'Robert Wilson', 
-      room: '212', 
-      age: 71,
-      status: 'warning', 
-      heartRate: 88, 
-      spo2: 94, 
-      temperature: 37.0,
-      lastUpdate: '3 min ago'
-    },
-  ];
 
   const filteredPatients = patients.filter(p => {
     const matchesStatus = filter === 'all' || p.status === filter;
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.room.includes(searchQuery);
+    const matchesSearch = p.userId.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesStatus && matchesSearch;
   });
 
@@ -102,14 +34,12 @@ const PatientList: React.FC<PatientListProps> = ({ searchQuery = '', setActiveIt
       animate={{ opacity: 1, y: 0 }}
       className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg overflow-hidden"
     >
-      {/* Header */}
       <div className="p-6 border-b border-slate-200 dark:border-slate-700">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Active Patients</h3>
           <span className="text-sm text-slate-500">Total: {patients.length}</span>
         </div>
         
-        {/* Filter Buttons */}
         <div className="flex space-x-2">
           {(['all', 'stable', 'warning', 'critical'] as const).map(type => (
             <button
@@ -130,14 +60,13 @@ const PatientList: React.FC<PatientListProps> = ({ searchQuery = '', setActiveIt
         </div>
       </div>
 
-      {/* Patient List */}
       <div className="divide-y divide-slate-200 dark:divide-slate-700 max-h-96 overflow-y-auto">
         {filteredPatients.map(patient => (
           <motion.div
-            key={patient.id}
+            key={patient.userId}
             whileHover={{ backgroundColor: 'rgba(0,0,0,0.02)' }}
             className={`p-4 cursor-pointer transition-all ${
-              selectedPatient?.id === patient.id ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+              selectedPatient?.userId === patient.userId ? 'bg-blue-50 dark:bg-blue-900/20' : ''
             }`}
             onClick={() => setSelectedPatient(patient)}
           >
@@ -150,10 +79,7 @@ const PatientList: React.FC<PatientListProps> = ({ searchQuery = '', setActiveIt
                 }`} />
                 <div>
                   <div className="flex items-center space-x-2">
-                    <span className="font-semibold text-slate-800 dark:text-white">{patient.name}</span>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
-                      Room {patient.room}
-                    </span>
+                    <span className="font-semibold text-slate-800 dark:text-white">{patient.userId}</span>
                   </div>
                   <div className="flex items-center space-x-3 mt-1">
                     <div className="flex items-center space-x-1">
@@ -163,10 +89,6 @@ const PatientList: React.FC<PatientListProps> = ({ searchQuery = '', setActiveIt
                     <div className="flex items-center space-x-1">
                       <Droplets className="w-3 h-3 text-blue-500" />
                       <span className="text-xs text-slate-600 dark:text-slate-300">{patient.spo2}%</span>
-                    </div>
-                    <div className="flex items-center space-x-1">
-                      <Thermometer className="w-3 h-3 text-orange-500" />
-                      <span className="text-xs text-slate-600 dark:text-slate-300">{patient.temperature}°C</span>
                     </div>
                   </div>
                 </div>
@@ -179,9 +101,8 @@ const PatientList: React.FC<PatientListProps> = ({ searchQuery = '', setActiveIt
               </div>
             </div>
             
-            {/* Patient Details (expand when selected) */}
             <AnimatePresence>
-              {selectedPatient?.id === patient.id && (
+              {selectedPatient?.userId === patient.userId && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
@@ -189,8 +110,6 @@ const PatientList: React.FC<PatientListProps> = ({ searchQuery = '', setActiveIt
                   className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700"
                 >
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="text-slate-500">Age:</div>
-                    <div className="text-slate-800 dark:text-white">{patient.age} years</div>
                     <div className="text-slate-500">Last Update:</div>
                     <div className="text-slate-800 dark:text-white">{patient.lastUpdate}</div>
                     <div className="text-slate-500">Risk Level:</div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import VitalsCard from './VitalsCard';
 import HealthChart from './HealthChart';
@@ -7,6 +7,9 @@ import PatientList from './PatientList';
 import AlertCenter from './AlertCenter';
 import StatsOverview from './StatsOverview';
 import { Heart, Droplets, Wind, Footprints, TrendingUp, AlertTriangle } from 'lucide-react';
+import { API_BASE_URL } from '../config';
+import { fetchAllHistory } from '../api';
+import { AlertItem, ActivityItem, HealthRecord, PatientItem, StatsSummary } from '../types';
 interface Vitals {
   heartRate: number;
   spo2: number;
@@ -34,54 +37,242 @@ const Dashboard: React.FC<DashboardProps> = ({ searchQuery = '', setActiveItem }
   });
 
   const [historicalData, setHistoricalData] = useState<any[]>([]);
+  const [records, setRecords] = useState<HealthRecord[]>([]);
+  const [activeUserId, setActiveUserId] = useState("demo_patient_001");
 
-  // Simulate real-time data updates
+  // Simulate real-time data updates and push to Backend API
   useEffect(() => {
-    const interval = setInterval(() => {
+    let token = '';
+
+    // 1. Get Authentication Token first
+    const authenticate = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/auth/token?user_id=demo_doctor_01`, {
+          method: 'POST'
+        });
+        if (response.ok) {
+          const data = await response.json();
+          token = data.access_token;
+          console.log("Successfully authenticated with Backend.");
+        }
+      } catch (err) {
+        console.error("Failed to authenticate with backend:", err);
+      }
+    };
+    
+    authenticate();
+
+    // 2. Continuous Monitoring Loop
+    const interval = setInterval(async () => {
       setVitals(prev => {
+        const userIndex = Math.floor(Date.now() / 5000) % 25;
+        const currentUserId = `user_${String(userIndex + 1).padStart(3, "0")}`;
+        setActiveUserId(currentUserId);
         // Simulate realistic variations
-        const newHeartRate = Math.max(60, Math.min(100, prev.heartRate + (Math.random() - 0.5) * 3));
-        const newSpo2 = Math.max(95, Math.min(100, prev.spo2 + (Math.random() - 0.5)));
+        let newHeartRate = Math.max(60, Math.min(100, prev.heartRate + (Math.random() - 0.5) * 5));
+        let newSpo2 = Math.max(94, Math.min(100, prev.spo2 + (Math.random() - 0.5) * 2));
         const newSystolic = Math.max(110, Math.min(140, prev.systolic + (Math.random() - 0.5) * 2));
         const newDiastolic = Math.max(70, Math.min(90, prev.diastolic + (Math.random() - 0.5) * 2));
-        
-        // Determine risk level
-        let risk: 'Normal' | 'Warning' | 'Critical' = 'Normal';
-        if (newHeartRate > 90 || newHeartRate < 50 || newSpo2 < 94) {
-          risk = 'Warning';
-          if (newHeartRate > 110 || newSpo2 < 90) {
-            risk = 'Critical';
-          }
+        const newSteps = prev.steps + Math.floor(Math.random() * 5);
+
+        // Inject unhealthy spikes occasionally to demonstrate alerts
+        const spikeRoll = Math.random();
+        if (spikeRoll < 0.08) {
+          // Critical event
+          newHeartRate = 145 + Math.random() * 15; // 145-160
+          newSpo2 = 84 + Math.random() * 5;        // 84-89
+        } else if (spikeRoll < 0.22) {
+          // Warning event
+          newHeartRate = 105 + Math.random() * 15; // 105-120
+          newSpo2 = 90 + Math.random() * 4;        // 90-94
         }
 
-        // Add to historical data
-        const newData = {
-          time: new Date().toLocaleTimeString(),
-          heartRate: Math.round(newHeartRate),
-          spo2: Math.round(newSpo2),
-          systolic: Math.round(newSystolic),
-          diastolic: Math.round(newDiastolic)
-        };
-
-        setHistoricalData(prev => {
-          const updated = [...prev, newData];
-          return updated.slice(-20); // Keep last 20 data points
-        });
+        // 3. Send via Remote API if authenticated
+        if (token) {
+          fetch(`${API_BASE_URL}/api/predict`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              user_id: currentUserId,
+              heart_rate: Math.round(newHeartRate),
+              spo2: Math.round(newSpo2),
+              steps: newSteps
+            })
+          })
+          .then(res => res.json())
+          .then(data => {
+            if (data.risk_level) {
+               // Update state with AI verified risk level
+               setVitals(current => ({
+                 ...current,
+                 risk: data.risk_level as 'Normal' | 'Warning' | 'Critical'
+               }));
+            }
+          })
+          .catch(err => console.error("API Error: ", err));
+        }
 
         return {
           heartRate: Math.round(newHeartRate),
           spo2: Math.round(newSpo2),
-          steps: prev.steps + Math.floor(Math.random() * 5),
+          steps: newSteps,
           systolic: Math.round(newSystolic),
           diastolic: Math.round(newDiastolic),
           timestamp: new Date(),
-          risk
+          risk: prev.risk // temporarily keep old risk until API responds
         };
       });
-    }, 3000);
+    }, 5000); // 5 second intervals to avoid spamming the LLM API
 
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadHistory = async () => {
+      try {
+        const data = await fetchAllHistory(200);
+        if (isMounted) {
+          setRecords(data);
+        }
+      } catch (err) {
+        // ignore for now; UI will keep showing last known data
+      }
+    };
+
+    loadHistory();
+    const historyInterval = setInterval(loadHistory, 10000);
+    return () => {
+      isMounted = false;
+      clearInterval(historyInterval);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (records.length === 0) return;
+    const recentRecords = records
+      .filter(r => r.user_id === activeUserId);
+
+    const fallbackUserId = recentRecords.length
+      ? activeUserId
+      : (records[0]?.user_id || activeUserId);
+
+    const recent = records
+      .filter(r => r.user_id === fallbackUserId)
+      .map(r => ({
+        ...r,
+        heart_rate: Number(r.heart_rate),
+        spo2: Number(r.spo2),
+      }))
+      .filter(r => Number.isFinite(r.heart_rate) && Number.isFinite(r.spo2))
+      .slice(0, 20)
+      .reverse()
+      .map(r => ({
+        time: new Date(r.timestamp).toLocaleTimeString(),
+        heartRate: Math.round(r.heart_rate),
+        spo2: Math.round(r.spo2),
+        systolic: 120,
+        diastolic: 80
+      }));
+    setHistoricalData(recent);
+  }, [records, activeUserId]);
+
+  const stats: StatsSummary = useMemo(() => {
+    if (records.length === 0) {
+      return {
+        totalPatients: 0,
+        avgHeartRate: 0,
+        avgSpo2: 0,
+        criticalCount: 0,
+        deltaPatients: 0,
+        deltaHeartRate: 0,
+        deltaSpo2: 0,
+        deltaCritical: 0
+      };
+    }
+
+    const sorted = [...records].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    const recent = sorted.slice(0, 20);
+    const previous = sorted.slice(20, 40);
+
+    const avg = (items: HealthRecord[], key: "heart_rate" | "spo2") =>
+      items.reduce((sum, r) => sum + (r[key] || 0), 0) / (items.length || 1);
+
+    const recentAvgHr = avg(recent, "heart_rate");
+    const prevAvgHr = avg(previous, "heart_rate");
+    const recentAvgSpo2 = avg(recent, "spo2");
+    const prevAvgSpo2 = avg(previous, "spo2");
+
+    const totalPatients = new Set(sorted.map(r => r.user_id)).size;
+    const prevPatients = new Set(previous.map(r => r.user_id)).size;
+    const criticalCount = recent.filter(r => r.risk_level === "Critical").length;
+    const prevCritical = previous.filter(r => r.risk_level === "Critical").length;
+
+    return {
+      totalPatients,
+      avgHeartRate: recentAvgHr || 0,
+      avgSpo2: recentAvgSpo2 || 0,
+      criticalCount,
+      deltaPatients: totalPatients - prevPatients,
+      deltaHeartRate: (recentAvgHr - prevAvgHr) || 0,
+      deltaSpo2: (recentAvgSpo2 - prevAvgSpo2) || 0,
+      deltaCritical: (criticalCount - prevCritical) || 0
+    };
+  }, [records]);
+
+  const alerts: AlertItem[] = useMemo(() => {
+    return records
+      .map(r => ({ ...r, heart_rate: Number(r.heart_rate), spo2: Number(r.spo2) }))
+      .filter(r => Number.isFinite(r.heart_rate) && Number.isFinite(r.spo2))
+      .filter(r => r.risk_level !== "Normal")
+      .slice(0, 10)
+      .map(r => ({
+        id: r.id || `${r.user_id}-${r.timestamp}`,
+        type: r.risk_level === "Critical" ? "critical" : "warning",
+        patient: r.user_id,
+        message: `${r.risk_level} vitals detected (HR ${r.heart_rate}, SpO₂ ${r.spo2}%)`,
+        time: new Date(r.timestamp).toLocaleTimeString(),
+        read: false
+      }));
+  }, [records]);
+
+  const activities: ActivityItem[] = useMemo(() => {
+    return records
+      .map(r => ({ ...r, heart_rate: Number(r.heart_rate), spo2: Number(r.spo2) }))
+      .filter(r => Number.isFinite(r.heart_rate) && Number.isFinite(r.spo2))
+      .slice(0, 8)
+      .map(r => ({
+      id: r.id || `${r.user_id}-${r.timestamp}`,
+      title: "Patient vitals updated",
+      description: `${r.user_id} • HR ${Math.round(r.heart_rate)} BPM • SpO₂ ${Math.round(r.spo2)}%`,
+      time: new Date(r.timestamp).toLocaleTimeString(),
+      status: r.risk_level === "Critical" ? "critical" : r.risk_level === "Warning" ? "warning" : "normal"
+    }));
+  }, [records]);
+
+  const patients: PatientItem[] = useMemo(() => {
+    const latestByUser = new Map<string, HealthRecord>();
+    records.forEach(r => {
+      const hr = Number(r.heart_rate);
+      const sp = Number(r.spo2);
+      if (!Number.isFinite(hr) || !Number.isFinite(sp)) return;
+      const existing = latestByUser.get(r.user_id);
+      if (!existing || new Date(r.timestamp).getTime() > new Date(existing.timestamp).getTime()) {
+        latestByUser.set(r.user_id, { ...r, heart_rate: hr, spo2: sp });
+      }
+    });
+
+    return Array.from(latestByUser.values()).map(r => ({
+      userId: r.user_id,
+      status: r.risk_level === "Critical" ? "critical" : r.risk_level === "Warning" ? "warning" : "stable",
+      heartRate: Math.round(r.heart_rate),
+      spo2: Math.round(r.spo2),
+      lastUpdate: new Date(r.timestamp).toLocaleTimeString()
+    }));
+  }, [records]);
 
   const vitalsData = [
     {
@@ -128,7 +319,7 @@ const Dashboard: React.FC<DashboardProps> = ({ searchQuery = '', setActiveItem }
   return (
     <div className="space-y-6">
       {/* Stats Overview */}
-      <StatsOverview />
+      <StatsOverview stats={stats} />
 
       {/* Welcome Banner */}
       <motion.div
@@ -146,11 +337,11 @@ const Dashboard: React.FC<DashboardProps> = ({ searchQuery = '', setActiveItem }
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2 bg-white/20 rounded-full px-4 py-2">
               <TrendingUp className="w-4 h-4" />
-              <span className="text-sm">Active Patients: 12</span>
+              <span className="text-sm">Active Patients: {stats.totalPatients}</span>
             </div>
             <div className="flex items-center space-x-2 bg-white/20 rounded-full px-4 py-2">
               <AlertTriangle className="w-4 h-4" />
-              <span className="text-sm">Critical Alerts: 2</span>
+              <span className="text-sm">Critical Alerts: {stats.criticalCount}</span>
             </div>
           </div>
         </div>
@@ -211,14 +402,21 @@ const Dashboard: React.FC<DashboardProps> = ({ searchQuery = '', setActiveItem }
           <HealthChart data={historicalData} />
         </div>
         <div className="lg:col-span-1">
-          <ActivityTimeline />
+          <ActivityTimeline
+            activities={activities}
+            stats={{
+              totalPatients: stats.totalPatients,
+              warnings: records.filter(r => r.risk_level === "Warning").length,
+              critical: records.filter(r => r.risk_level === "Critical").length
+            }}
+          />
         </div>
       </div>
 
       {/* Two Column Layout for Patient List and Alert Center */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <PatientList searchQuery={searchQuery} setActiveItem={setActiveItem} />
-        <AlertCenter />
+        <PatientList patients={patients} searchQuery={searchQuery} setActiveItem={setActiveItem} />
+        <AlertCenter alerts={alerts} />
       </div>
     </div>
   );

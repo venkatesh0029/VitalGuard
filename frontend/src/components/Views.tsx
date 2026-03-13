@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Activity, Calendar, BarChart3, Users, Bell, Shield, Settings as SettingsIcon, Filter, Search, Download, Mail, Phone, MoreVertical, Key, Lock, MonitorSmartphone, Fingerprint, Globe, UserCog, Check } from 'lucide-react';
+import { Activity, Calendar, BarChart3, Users, Bell, Shield, Settings as SettingsIcon, Filter, Search, Download, Mail, Phone, MoreVertical, Key, Lock, MonitorSmartphone, Fingerprint, Globe, UserCog, Check, Upload } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import AlertCenter from './AlertCenter';
 import HealthChart from './HealthChart';
+import { API_BASE_URL } from '../config';
+import { fetchAllHistory } from '../api';
+import { AlertItem, HealthRecord } from '../types';
 
 interface ViewProps {
   title: string;
@@ -45,22 +48,50 @@ export const VitalsView = () => {
   const [historicalData, setHistoricalData] = useState<any[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [showFilterOptions, setShowFilterOptions] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [showToast, setShowToast] = useState(false);
+  const [riskDist, setRiskDist] = useState({ normal: 0, warning: 0, critical: 0 });
 
-  // Generate 24 hours of mock data
   useEffect(() => {
-    const data = [];
-    let baseHR = 72;
-    let baseSpo2 = 98;
-    for (let i = 0; i < 24; i++) {
-      baseHR = Math.max(60, Math.min(100, baseHR + (Math.random() - 0.5) * 10));
-      baseSpo2 = Math.max(92, Math.min(100, baseSpo2 + (Math.random() - 0.5) * 2));
-      data.push({
-        time: `${i}:00`,
-        heartRate: Math.round(baseHR),
-        spo2: Math.round(baseSpo2),
-      });
-    }
-    setHistoricalData(data);
+    const load = async () => {
+      try {
+        const records = await fetchAllHistory(200);
+        const cleaned = records
+          .map(r => ({ ...r, heart_rate: Number(r.heart_rate), spo2: Number(r.spo2) }))
+          .filter(r => Number.isFinite(r.heart_rate) && Number.isFinite(r.spo2));
+
+        const primaryUserId = cleaned[0]?.user_id || "user_001";
+
+        const data = cleaned
+          .filter(r => r.user_id === primaryUserId)
+          .slice(0, 24)
+          .reverse()
+          .map(r => ({
+            time: new Date(r.timestamp).toLocaleTimeString(),
+            heartRate: Math.round(r.heart_rate),
+            spo2: Math.round(r.spo2),
+          }));
+        setHistoricalData(data);
+
+        const counts = cleaned.reduce(
+          (acc, r) => {
+            if (r.risk_level === "Critical") acc.critical += 1;
+            else if (r.risk_level === "Warning") acc.warning += 1;
+            else acc.normal += 1;
+            return acc;
+          },
+          { normal: 0, warning: 0, critical: 0 }
+        );
+        setRiskDist(counts);
+      } catch {
+        // keep current data if fetch fails
+      }
+    };
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleExport = () => {
@@ -68,8 +99,79 @@ export const VitalsView = () => {
     setTimeout(() => setIsExporting(false), 2000);
   };
 
+  const showNotification = (msg: string) => {
+    setToastMessage(msg);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  const handleCsvUpload = async () => {
+    if (!csvFile) {
+      showNotification('Please choose a CSV file first');
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const tokenResponse = await fetch(`${API_BASE_URL}/auth/token?user_id=demo_doctor_01`, { method: 'POST' });
+      const tokenData = await tokenResponse.json();
+      const token = tokenData.access_token;
+
+      const formData = new FormData();
+      formData.append('file', csvFile);
+
+      const res = await fetch(`${API_BASE_URL}/api/import/csv`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showNotification(data.detail || 'CSV import failed');
+      } else {
+        showNotification(`Imported ${data.inserted} rows${data.errors?.length ? `, ${data.errors.length} errors` : ''}`);
+      }
+    } catch (err) {
+      showNotification('CSV upload failed');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
+        <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-4">Import Patient Vitals (CSV)</h3>
+        <div className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+          Required columns: <span className="font-medium">heart_rate, spo2</span> | Optional: steps, user_id, timestamp
+        </div>
+        <div className="flex flex-col md:flex-row gap-3 md:items-center">
+          <input
+            type="file"
+            accept=".csv"
+            onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
+            className="block w-full text-sm text-slate-600 dark:text-slate-300
+              file:mr-4 file:py-2 file:px-4
+              file:rounded-lg file:border-0
+              file:text-sm file:font-semibold
+              file:bg-slate-100 file:text-slate-700
+              hover:file:bg-slate-200
+              dark:file:bg-slate-700 dark:file:text-slate-200 dark:hover:file:bg-slate-600"
+          />
+          <button
+            onClick={handleCsvUpload}
+            disabled={isUploading}
+            className={`px-4 py-2 text-white rounded-lg text-sm flex items-center transition-all ${
+              isUploading ? 'bg-green-500' : 'bg-blue-500 hover:bg-blue-600'
+            }`}
+          >
+            <Upload className="w-4 h-4 mr-2" />
+            {isUploading ? 'Uploading...' : 'Upload CSV'}
+          </button>
+        </div>
+      </div>
+
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Detailed Vitals Analysis</h2>
         <div className="flex gap-2 relative">
@@ -119,52 +221,91 @@ export const VitalsView = () => {
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-slate-500">Normal</span>
-                <span className="font-medium text-slate-800 dark:text-white">85%</span>
+                <span className="font-medium text-slate-800 dark:text-white">
+                  {riskDist.normal + riskDist.warning + riskDist.critical
+                    ? Math.round((riskDist.normal / (riskDist.normal + riskDist.warning + riskDist.critical)) * 100)
+                    : 0}%
+                </span>
               </div>
               <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div className="h-full bg-green-500 w-[85%]"></div>
+                <div
+                  className="h-full bg-green-500"
+                  style={{
+                    width: `${riskDist.normal + riskDist.warning + riskDist.critical
+                      ? Math.round((riskDist.normal / (riskDist.normal + riskDist.warning + riskDist.critical)) * 100)
+                      : 0}%`
+                  }}
+                ></div>
               </div>
             </div>
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-slate-500">Warning</span>
-                <span className="font-medium text-slate-800 dark:text-white">12%</span>
+                <span className="font-medium text-slate-800 dark:text-white">
+                  {riskDist.normal + riskDist.warning + riskDist.critical
+                    ? Math.round((riskDist.warning / (riskDist.normal + riskDist.warning + riskDist.critical)) * 100)
+                    : 0}%
+                </span>
               </div>
               <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div className="h-full bg-yellow-500 w-[12%]"></div>
+                <div
+                  className="h-full bg-yellow-500"
+                  style={{
+                    width: `${riskDist.normal + riskDist.warning + riskDist.critical
+                      ? Math.round((riskDist.warning / (riskDist.normal + riskDist.warning + riskDist.critical)) * 100)
+                      : 0}%`
+                  }}
+                ></div>
               </div>
             </div>
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span className="text-slate-500">Critical</span>
-                <span className="font-medium text-slate-800 dark:text-white">3%</span>
+                <span className="font-medium text-slate-800 dark:text-white">
+                  {riskDist.normal + riskDist.warning + riskDist.critical
+                    ? Math.round((riskDist.critical / (riskDist.normal + riskDist.warning + riskDist.critical)) * 100)
+                    : 0}%
+                </span>
               </div>
               <div className="h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                <div className="h-full bg-red-500 w-[3%]"></div>
+                <div
+                  className="h-full bg-red-500"
+                  style={{
+                    width: `${riskDist.normal + riskDist.warning + riskDist.critical
+                      ? Math.round((riskDist.critical / (riskDist.normal + riskDist.warning + riskDist.critical)) * 100)
+                      : 0}%`
+                  }}
+                ></div>
               </div>
             </div>
           </div>
         </div>
       </div>
+      <MockToast message={toastMessage} isVisible={showToast} />
     </div>
   );
 };
 
 export const HistoryView = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  
-  const recentVisits = [
-    { id: 1, date: '2023-10-24', patient: 'John Doe', doctor: 'Dr. Sarah Chen', condition: 'Hypertension Follow-up', status: 'Completed' },
-    { id: 2, date: '2023-10-23', patient: 'Sarah Smith', doctor: 'Dr. Michael Wong', condition: 'Arrhythmia Monitoring', status: 'Admitted' },
-    { id: 3, date: '2023-10-21', patient: 'Robert Wilson', doctor: 'Dr. Sarah Chen', condition: 'Post-Op Check', status: 'Completed' },
-    { id: 4, date: '2023-10-20', patient: 'Emily Davis', doctor: 'Dr. James Miller', condition: 'Routine Assessment', status: 'Discharged' },
-    { id: 5, date: '2023-10-18', patient: 'Michael Brown', doctor: 'Dr. Sarah Chen', condition: 'Cardiac Event', status: 'Critical' },
-  ];
+  const [records, setRecords] = useState<HealthRecord[]>([]);
 
-  const filteredVisits = recentVisits.filter(visit => 
-    visit.patient.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    visit.doctor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    visit.condition.toLowerCase().includes(searchTerm.toLowerCase())
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await fetchAllHistory(200);
+        setRecords(data);
+      } catch {
+        setRecords([]);
+      }
+    };
+    load();
+    const interval = setInterval(load, 15000);
+    return () => clearInterval(interval);
+  }, []);
+  
+  const filteredRecords = records.filter(visit => 
+    visit.user_id.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -188,33 +329,32 @@ export const HistoryView = () => {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-700">
-                <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Date</th>
+                <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Timestamp</th>
                 <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Patient</th>
-                <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Attending Doctor</th>
-                <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Condition/Notes</th>
-                <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Status</th>
+                <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Heart Rate</th>
+                <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">SpO₂</th>
+                <th className="p-4 text-sm font-semibold text-slate-600 dark:text-slate-300">Risk</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-              {filteredVisits.length > 0 ? (
-                filteredVisits.map((visit) => (
-                  <tr key={visit.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                    <td className="p-4 text-sm text-slate-800 dark:text-white whitespace-nowrap">{visit.date}</td>
-                  <td className="p-4 text-sm font-medium text-slate-800 dark:text-white">{visit.patient}</td>
-                  <td className="p-4 text-sm text-slate-500 dark:text-slate-400">{visit.doctor}</td>
-                  <td className="p-4 text-sm text-slate-500 dark:text-slate-400">{visit.condition}</td>
-                  <td className="p-4">
-                    <span className={`px-2 py-1 text-xs rounded-full whitespace-nowrap ${
-                      visit.status === 'Completed' ? 'bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400' :
-                      visit.status === 'Critical' ? 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400' :
-                      visit.status === 'Admitted' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400' :
-                      'bg-slate-100 text-slate-700 dark:bg-slate-500/10 dark:text-slate-400'
-                    }`}>
-                      {visit.status}
-                    </span>
-                  </td>
-                </tr>
-              ))
+              {filteredRecords.length > 0 ? (
+                filteredRecords.map((visit) => (
+                  <tr key={`${visit.user_id}-${visit.timestamp}`} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <td className="p-4 text-sm text-slate-800 dark:text-white whitespace-nowrap">{new Date(visit.timestamp).toLocaleString()}</td>
+                    <td className="p-4 text-sm font-medium text-slate-800 dark:text-white">{visit.user_id}</td>
+                    <td className="p-4 text-sm text-slate-500 dark:text-slate-400">{visit.heart_rate}</td>
+                    <td className="p-4 text-sm text-slate-500 dark:text-slate-400">{visit.spo2}%</td>
+                    <td className="p-4">
+                      <span className={`px-2 py-1 text-xs rounded-full whitespace-nowrap ${
+                        visit.risk_level === 'Normal' ? 'bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400' :
+                        visit.risk_level === 'Critical' ? 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400' :
+                        'bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400'
+                      }`}>
+                        {visit.risk_level}
+                      </span>
+                    </td>
+                  </tr>
+                ))
               ) : (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-slate-500 dark:text-slate-400">
@@ -232,23 +372,60 @@ export const HistoryView = () => {
 
 export const AnalyticsView = () => {
   const [timeframe, setTimeframe] = useState('30days');
+  const [records, setRecords] = useState<HealthRecord[]>([]);
 
-  // Change data multiplier based on timeframe to simulate switching data sets
-  const multiplier = timeframe === '30days' ? 1 : timeframe === '7days' ? 0.3 : 0.05;
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await fetchAllHistory(200);
+        setRecords(data);
+      } catch {
+        setRecords([]);
+      }
+    };
+    load();
+    const interval = setInterval(load, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const departmentData = [
-    { name: 'Cardiology', patients: Math.floor(45 * multiplier) },
-    { name: 'Neurology', patients: Math.floor(30 * multiplier) },
-    { name: 'Oncology', patients: Math.floor(25 * multiplier) },
-    { name: 'Pediatrics', patients: Math.floor(35 * multiplier) },
-    { name: 'Emergency', patients: Math.floor(50 * multiplier) },
-  ];
+  const now = new Date();
+  const filteredRecords = records.filter(r => {
+    const ts = new Date(r.timestamp);
+    if (timeframe === 'today') {
+      return ts.toDateString() === now.toDateString();
+    }
+    if (timeframe === '7days') {
+      return (now.getTime() - ts.getTime()) <= 7 * 24 * 60 * 60 * 1000;
+    }
+    return (now.getTime() - ts.getTime()) <= 30 * 24 * 60 * 60 * 1000;
+  });
+
+  const byUser = filteredRecords.reduce<Record<string, { count: number; avgHr: number }>>((acc, r) => {
+    const existing = acc[r.user_id] || { count: 0, avgHr: 0 };
+    existing.count += 1;
+    existing.avgHr += r.heart_rate;
+    acc[r.user_id] = existing;
+    return acc;
+  }, {});
+
+  const userData = Object.entries(byUser)
+    .map(([name, v]) => ({ name, patients: Math.round(v.avgHr / v.count) }))
+    .slice(0, 6);
+
+  const riskCounts = filteredRecords.reduce(
+    (acc, r) => {
+      acc[r.risk_level] = (acc[r.risk_level] || 0) + 1;
+      return acc;
+    },
+    { Normal: 0, Warning: 0, Critical: 0 } as Record<string, number>
+  );
 
   const occupancyData = [
-    { name: 'Occupied', value: Math.floor(185 * multiplier) || 10 },
-    { name: 'Available', value: Math.floor(65 * multiplier) || 5 },
+    { name: 'Normal', value: riskCounts.Normal },
+    { name: 'Warning', value: riskCounts.Warning },
+    { name: 'Critical', value: riskCounts.Critical },
   ];
-  const COLORS = ['#ef4444', '#22c55e'];
+  const COLORS = ['#22c55e', '#f59e0b', '#ef4444'];
 
   return (
     <div className="space-y-6">
@@ -268,10 +445,10 @@ export const AnalyticsView = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Bar Chart */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
-          <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-6">Patients by Department</h3>
+          <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-6">Average Heart Rate by Patient</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={departmentData}>
+              <BarChart data={userData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.1} />
                 <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
@@ -287,7 +464,7 @@ export const AnalyticsView = () => {
 
         {/* Pie Chart */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
-          <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-6">Bed Occupancy</h3>
+          <h3 className="text-lg font-semibold text-slate-800 dark:text-white mb-6">Risk Distribution</h3>
           <div className="h-64 flex items-center justify-center relative">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -309,18 +486,24 @@ export const AnalyticsView = () => {
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-3xl font-bold text-slate-800 dark:text-white">74%</span>
-              <span className="text-sm text-slate-500">Filled</span>
+              <span className="text-3xl font-bold text-slate-800 dark:text-white">
+                {filteredRecords.length ? Math.round((riskCounts.Warning + riskCounts.Critical) / filteredRecords.length * 100) : 0}%
+              </span>
+              <span className="text-sm text-slate-500">Alerts</span>
             </div>
           </div>
           <div className="flex justify-center mt-4 space-x-6">
             <div className="flex items-center">
-              <div className="w-3 h-3 rounded-full bg-red-500 mr-2"></div>
-              <span className="text-sm text-slate-600 dark:text-slate-300">Occupied (185)</span>
+              <div className="w-3 h-3 rounded-full bg-green-500 mr-2"></div>
+              <span className="text-sm text-slate-600 dark:text-slate-300">Normal ({riskCounts.Normal})</span>
             </div>
             <div className="flex items-center">
-              <div className="w-3 h-3 rounded-full bg-green-500 mr-2"></div>
-              <span className="text-sm text-slate-600 dark:text-slate-300">Available (65)</span>
+              <div className="w-3 h-3 rounded-full bg-yellow-500 mr-2"></div>
+              <span className="text-sm text-slate-600 dark:text-slate-300">Warning ({riskCounts.Warning})</span>
+            </div>
+            <div className="flex items-center">
+              <div className="w-3 h-3 rounded-full bg-red-500 mr-2"></div>
+              <span className="text-sm text-slate-600 dark:text-slate-300">Critical ({riskCounts.Critical})</span>
             </div>
           </div>
         </div>
@@ -405,12 +588,42 @@ export const TeamView = () => {
   );
 };
 
-export const AlertsView = () => (
-  <div className="max-w-4xl mx-auto">
-    <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-6">System Alerts & Notifications</h2>
-    <AlertCenter />
-  </div>
-);
+export const AlertsView = () => {
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const data = await fetchAllHistory(100);
+        const list: AlertItem[] = data
+          .map(r => ({ ...r, heart_rate: Number(r.heart_rate), spo2: Number(r.spo2) }))
+          .filter(r => Number.isFinite(r.heart_rate) && Number.isFinite(r.spo2))
+          .filter(r => r.risk_level !== "Normal")
+          .map(r => ({
+            id: r.id || `${r.user_id}-${r.timestamp}`,
+            type: (r.risk_level === "Critical" ? "critical" : "warning") as "critical" | "warning",
+            patient: r.user_id,
+            message: `${r.risk_level} vitals detected (HR ${r.heart_rate}, SpO₂ ${r.spo2}%)`,
+            time: new Date(r.timestamp).toLocaleTimeString(),
+            read: false
+          }));
+        setAlerts(list);
+      } catch {
+        setAlerts([]);
+      }
+    };
+    load();
+    const interval = setInterval(load, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-6">System Alerts & Notifications</h2>
+      <AlertCenter alerts={alerts} />
+    </div>
+  );
+};
 
 export const SecurityView = () => {
   const [twoFactor, setTwoFactor] = useState(true);

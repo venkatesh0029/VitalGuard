@@ -13,4 +13,4 @@ twilio==9.0.4
 
 # Uncomment for Firebase:
 # firebase-admin==6.5.0
-
+requests==2.31.0

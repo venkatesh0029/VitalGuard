@@ -6,13 +6,17 @@ from contextlib import asynccontextmanager
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from routes import predict, history, alerts
+from routes import predict, history, alerts, importer, test_alerts
 from utils.ml_model import load_model
 from utils.security import verify_access_token, create_access_token, get_security_headers, Token
 from models.schemas import VitalsInput
 import uvicorn
 import logging
 import os
+from dotenv import load_dotenv
+
+# Force UTF-8 loading of .env before slowapi tries to read it
+load_dotenv(encoding="utf-8")
 
 # Configure logging
 logging.basicConfig(
@@ -22,17 +26,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ── Rate Limiting ──────────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address)
+# Pass os.environ to avoid SlowAPI triggering Starlette's buggy .env reader
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Pre-load ML model
+    # Startup: Check AI engine availability
     logger.info("="*60)
     logger.info("🚀 HealthGuard API Starting...")
     logger.info("🔒 Security: Enabled (JWT, Rate Limiting, CORS, Encryption)")
     logger.info("="*60)
-    logger.info("🤖 Pre-loading ML model on startup...")
-    load_model()
+    ai_status = await load_model()
+    logger.info(f"🤖 AI Engine status: {ai_status}")
     logger.info("✅ API is ready! Running at http://localhost:8000")
     logger.info("📖 Swagger Docs: http://localhost:8000/docs")
     logger.info("="*60)
@@ -104,6 +109,12 @@ def root():
 def health_check():
     return {"status": "ok"}
 
+@app.get("/health/ai")
+async def ai_health_check():
+    """Check AI engine status."""
+    status = await load_model()
+    return {"ai_engine": status}
+
 @app.post("/auth/token", response_model=Token)
 def login_for_access_token(user_id: str = "default_user"):
     """
@@ -118,13 +129,8 @@ def login_for_access_token(user_id: str = "default_user"):
 app.include_router(predict.router, prefix="/api", tags=["Prediction"], dependencies=[Depends(verify_access_token)])
 app.include_router(history.router, prefix="/api", tags=["History"], dependencies=[Depends(verify_access_token)])
 app.include_router(alerts.router, prefix="/api", tags=["Alerts"], dependencies=[Depends(verify_access_token)])
-
-# ── Rate Limiting on Endpoints ─────────────────────────────────────────────
-@app.post("/api/predict")
-@limiter.limit("100/minute")
-async def predict_limited(request: Request, vitals: VitalsInput, user_id: str = Depends(verify_access_token)):
-    """Rate-limited prediction endpoint"""
-    pass  # Actual logic in routes/predict.py
+app.include_router(importer.router, prefix="/api", tags=["Import"], dependencies=[Depends(verify_access_token)])
+app.include_router(test_alerts.router, prefix="/api", tags=["Tests"], dependencies=[Depends(verify_access_token)])
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

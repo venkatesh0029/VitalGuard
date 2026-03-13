@@ -5,6 +5,7 @@ from models.schemas import VitalsInput, PredictionResponse
 from utils.ml_model import run_prediction
 from utils.database import save_record
 from utils.alerts import trigger_alert
+import os
 from utils.security import verify_access_token, encrypt_vitals
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ MESSAGES = {
 }
 
 @router.post("/predict", response_model=PredictionResponse)
-def predict(vitals: VitalsInput, auth_user_id: str = Depends(verify_access_token)):
+async def predict(vitals: VitalsInput, auth_user_id: str = Depends(verify_access_token)):
     """
     Receive health vitals → run ML model → return risk level.
     Also saves to DB and triggers alerts if needed.
@@ -30,7 +31,7 @@ def predict(vitals: VitalsInput, auth_user_id: str = Depends(verify_access_token
     
     logger.info(f"📊 Prediction request: user={user_id}, HR={vitals.heart_rate}, SpO2={vitals.spo2}")
     
-    result = run_prediction(vitals.heart_rate, vitals.spo2, vitals.steps)
+    result = await run_prediction(vitals.heart_rate, vitals.spo2, vitals.steps)
 
     risk_level   = result["risk_level"]
     risk_score   = result["risk_score"]
@@ -55,11 +56,13 @@ def predict(vitals: VitalsInput, auth_user_id: str = Depends(verify_access_token
     # ── Trigger alert for Warning / Critical ───────────────────────────────
     if risk_level in ("Warning", "Critical"):
         logger.warning(f"⚠️ {risk_level} vitals for {user_id}")
+        default_phone = os.getenv("ALERT_PHONE_NUMBER")
         trigger_alert(
             user_id    = user_id,
             risk_level = risk_level,
             heart_rate = vitals.heart_rate,
             spo2       = vitals.spo2,
+            phone      = default_phone,
         )
         alert_sent = True
 
@@ -71,7 +74,7 @@ def predict(vitals: VitalsInput, auth_user_id: str = Depends(verify_access_token
         risk_level      = risk_level,
         risk_score      = risk_score,
         confidence      = confidence,
-        message         = MESSAGES[risk_level],
+        message         = MESSAGES.get(risk_level, MESSAGES["Normal"]),
         timestamp       = now,
         alert_triggered = alert_sent,
     )

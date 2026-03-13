@@ -314,7 +314,7 @@ Address already in use
 ```
 **Fix:** Kill process or use different port:
 ```bash
-uvicorn main:app --port 8001
+uvicorn main:app --port 8002
 ```
 
 ---

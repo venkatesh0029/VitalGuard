@@ -1,14 +1,24 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Users, Heart, Activity, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { StatsSummary } from '../types';
 
-const StatsOverview = () => {
-  const stats = [
+interface StatsOverviewProps {
+  stats: StatsSummary;
+}
+
+const StatsOverview: React.FC<StatsOverviewProps> = ({ stats }) => {
+  const formatDelta = (value: number, suffix = '') => {
+    const sign = value > 0 ? '+' : value < 0 ? '' : '';
+    return `${sign}${value.toFixed(1)}${suffix}`;
+  };
+
+  const items = [
     {
       title: 'Total Patients',
-      value: '156',
-      change: '+12',
-      trend: 'up',
+      value: String(stats.totalPatients),
+      change: formatDelta(stats.deltaPatients, ''),
+      trend: stats.deltaPatients > 0 ? 'up' : stats.deltaPatients < 0 ? 'down' : 'neutral',
       icon: Users,
       color: 'from-blue-500 to-blue-600',
       bgColor: 'bg-blue-50 dark:bg-blue-500/10',
@@ -16,9 +26,9 @@ const StatsOverview = () => {
     },
     {
       title: 'Avg. Heart Rate',
-      value: '72 BPM',
-      change: '-3',
-      trend: 'down',
+      value: `${stats.avgHeartRate.toFixed(1)} BPM`,
+      change: formatDelta(stats.deltaHeartRate),
+      trend: stats.deltaHeartRate > 0 ? 'up' : stats.deltaHeartRate < 0 ? 'down' : 'neutral',
       icon: Heart,
       color: 'from-rose-500 to-rose-600',
       bgColor: 'bg-rose-50 dark:bg-rose-500/10',
@@ -26,9 +36,9 @@ const StatsOverview = () => {
     },
     {
       title: 'Avg. SpO₂',
-      value: '97%',
-      change: '+1%',
-      trend: 'up',
+      value: `${stats.avgSpo2.toFixed(1)}%`,
+      change: formatDelta(stats.deltaSpo2, '%'),
+      trend: stats.deltaSpo2 > 0 ? 'up' : stats.deltaSpo2 < 0 ? 'down' : 'neutral',
       icon: Activity,
       color: 'from-emerald-500 to-emerald-600',
       bgColor: 'bg-emerald-50 dark:bg-emerald-500/10',
@@ -36,9 +46,9 @@ const StatsOverview = () => {
     },
     {
       title: 'Critical Cases',
-      value: '3',
-      change: '+2',
-      trend: 'up',
+      value: String(stats.criticalCount),
+      change: formatDelta(stats.deltaCritical, ''),
+      trend: stats.deltaCritical > 0 ? 'up' : stats.deltaCritical < 0 ? 'down' : 'neutral',
       icon: TrendingUp,
       color: 'from-red-500 to-red-600',
       bgColor: 'bg-red-50 dark:bg-red-500/10',
@@ -48,7 +58,7 @@ const StatsOverview = () => {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {stats.map((stat, index) => (
+      {items.map((stat, index) => (
         <motion.div
           key={stat.title}
           initial={{ opacity: 0, y: 20 }}
@@ -77,7 +87,6 @@ const StatsOverview = () => {
           </h3>
           <p className="text-sm text-slate-500">{stat.title}</p>
 
-          {/* Progress Bar */}
           <div className="mt-4 h-1.5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
             <motion.div
               initial={{ width: 0 }}
