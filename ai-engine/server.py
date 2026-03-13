@@ -53,5 +53,5 @@ def predict_vitals(vitals: VitalsInput):
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    print("🚀 Starting VitalGuard AI Server on http://0.0.0.0:8000")
-    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)
+    print("🚀 Starting VitalGuard AI Server on http://0.0.0.0:8001")
+    uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=True)
